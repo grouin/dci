@@ -4,11 +4,14 @@
 # commune internationale) sur des fichiers tabulaires (indiquer 0
 # comme numéro de colonne si fichier non-tabulaire). Si le traitement
 # ne doit s'appliquer que sur les lignes correspondant à une
-# prédiction CRF, indiquer le label correspondant en dernier argument.
+# prédiction CRF, indiquer le label correspondant en dernier argument
+# (facultatif).
 #
-# On affiche la classe thérapeutique, sauf pour les anticorps
-# monoclonaux pour lesquels on affiche la classe pharmacologique. Si
-# la classe thérapeutique est vide, on prend la classe pharmaco.
+# perl mapping-dci.pl fichier num-colonne sortie [label]
+
+# On affiche la classe thérapeutique sauf si elle n'est pas renseignée
+# et pour les anticorps monoclonaux pour lesquels on affiche la classe
+# pharmacologique.
 #
 # On travaille sur les segments-clés en anglais et en français ; pour
 # la version en anglais, on mémorise également la version sans "e"
@@ -16,16 +19,17 @@
 #
 # Cette correspondance de segments-clés ne peut s'appliquer que sur
 # des prescriptions en DCI. Les vitamines et compléments alimentaires
-# ne sont donc pas identifiables. Les spécialités (noms commerciaux)
-# ne répondent pas à cette logique de nommage.
-
-# perl mapping-dci.pl fichier num-colonne sortie [label]
-
-# perl mapping-dci.pl ../../../../projet-Cress/scripts/europeen.csv 1 europeen.dci
+# ainsi que les spécialités (noms commerciaux) ne répondent pas à
+# cette logique de nommage. Il est donc pertinent d'identifier
+# préalablement les traitements pharmacologiques (médicaments) des
+# traitements non-pharmacologiques (e.g., cellules souches, plasma de
+# patient convalescent, masques, bain de bouche, vaccin BCG). Puis
+# identifier les traitements pharmacologiques en DCI.
 #
-# perl mapping-dci.pl treatment-cress.csv 2 sortie.dci
-# cut -f2 sortie.dci >out
-# paste treatment-cress.csv out >eval.csv
+# La liste des segments-clés a été manuellement constituée à partir de
+# sources diverses, dont l'OMS et les articles de la revue
+# Prescrire. Travailler sur les données présentes dans RxNorm pourrait
+# améliorer les performances.
 
 # Auteur : Cyril Grouin, juillet 2020.
 
@@ -188,7 +192,7 @@ sub identifieClasses() {
     if ($cont=~/(^|\W)$mti(s|)(\W|$)/) { $cl="MTI"; $k++; }
 
     # Parcourt des segments-clés pour identification dans le mot, en
-    # restreignant aux seuls affixes (les préfixes et suffixes étant
+    # restreignant aux seuls infixes (les préfixes et suffixes étant
     # trouvés par la suite) comprenant plus de 4 caractères (évite que
     # le segment-clé "-ni-" soit identifié dans Ciclesonide et
     # Prednisone au détriment des segments-clés "-onide" et "-pred-")
@@ -204,9 +208,9 @@ sub identifieClasses() {
     # 1° En supprimant les derniers caractères jusqu'au premier :
     # isotretinoin, isotretinoi, isotretino, isotretin, ..., iso
     for (my $j=length($cont);$j>2;$j--) {
-	my $mot=substr($cont,0,$j); my $prefixe="$mot\-"; my $suffixe="\-$mot"; my $affixe="\-$mot\-";
+	my $mot=substr($cont,0,$j); my $prefixe="$mot\-"; my $suffixe="\-$mot"; my $infixe="\-$mot\-";
 	if (exists $segments{$prefixe} && $cl eq "") { $cl="$segments{$prefixe}"; $k++; }
-	elsif (exists $segments{$affixe} && $cl eq "") { $cl="$segments{$affixe}"; $k++; }
+	elsif (exists $segments{$infixe} && $cl eq "") { $cl="$segments{$infixe}"; $k++; }
 	elsif (exists $segments{$suffixe} && $cl eq "") { $cl="$segments{$suffixe}"; $k++; }
     }
     # 2° En supprimant les premiers caractères jusqu'au dernier :
@@ -215,17 +219,30 @@ sub identifieClasses() {
     # correspondre tous les mots inconnus se terminant par -ine avec
     # des alcaloïdes et bases organiques)
     for (my $j=0;$j<length($cont)-3;$j++) {
-    	my $mot=substr($cont,$j); my $prefixe="$mot\-"; my $suffixe="\-$mot"; my $affixe="\-$mot\-";
-    	if (exists $segments{$affixe} && $cl eq "") { $cl="$segments{$affixe}"; $k++; }
+    	my $mot=substr($cont,$j); my $prefixe="$mot\-"; my $suffixe="\-$mot"; my $infixe="\-$mot\-";
+    	if (exists $segments{$infixe} && $cl eq "") { $cl="$segments{$infixe}"; $k++; }
     	elsif (exists $segments{$prefixe} && $cl eq "") { $cl="$segments{$prefixe}"; $k++; }
     	elsif (exists $segments{$suffixe} && $cl eq "") { $cl="$segments{$suffixe}"; $k++; }
     }
 
     # Nouveau parcourt des segments-clés, sans contrainte de taille du
-    # segment, pour compléter les prédictions des étapes précédentes
+    # segment, pour compléter les prédictions des étapes précédentes.
+
     foreach my $segment (sort keys %segments) {
-	# Affixes
-	if ($segment=~/^\-.*\-$/) { my $s=$segment; $s=~s/\-//g; if ($cont=~/\w$s\w/ && $cl eq "") { $cl="$segments{$segment}"; $k++; }}
+	# Infixes
+	if ($segment=~/^\-.*\-$/) {
+	    my $s=$segment; $s=~s/\-//g;
+	    if ($cont=~/\w$s(\w+)/ && $cl eq "") {
+		# On récupère la fin du mot après l'infixe identifié.
+		# Pour l'infixe -io-, on vérifie qu'il reste
+		# suffisamment de caractères pour éviter les erreurs
+		# sur les mots se terminant par "-tion" (inhalation,
+		# intervention) ou "microbiote".
+		my $finMot=$1;
+		if ($segment=~/\-io\-/) { if (length($finMot)>2) { $cl="$segments{$segment}"; $k++; }}
+		else { $cl="$segments{$segment}"; $k++; }
+	    }
+	}
 	# Préfixes
 	elsif ($segment=~/\-$/) { my $s=$segment; $s=~s/\-$//; if ($cont=~/^$s\w/ && $cl eq "") { $cl="$segments{$segment}"; $k++; }}
 	# Suffixes
