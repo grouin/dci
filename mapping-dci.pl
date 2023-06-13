@@ -118,6 +118,7 @@ close(S);
 
 sub traitement() {
     my $contenu=$_[0];
+    my $resultat="";
     
     # Plusieurs noms de médicament : "POTASSIUM CLAVULANATE+AMOXICILLIN"
     if ($contenu=~/[\+\,]/) {
@@ -131,16 +132,17 @@ sub traitement() {
 		for (my $i=0;$i<=$#cols3;$i++) {
 		    #warn "-- Traite $cols3[$i] parmi $medicament\n";
 		    my $contenu2=$cols3[$i]; $contenu2=~s/^\s+//; $contenu2=~s/\s+$//;
-		    my $classes=&identifieClasses($contenu2); $affichage.="$classes\, ";
+		    my ($classes,$res)=&identifieClasses($contenu2); $affichage.="$classes\, "; $resultat=$res;
 		}
 	    }
 	    else {
 		my $contenu2=$medicament; $contenu2=~s/^\s+//; $contenu2=~s/\s+$//;
-		my $classes=&identifieClasses($contenu2); $affichage.="$classes\, ";
+		my ($classes,$res)=&identifieClasses($contenu2); $affichage.="$classes\, "; $resultat=$res;
 	    }
 	}
 	$affichage=~s/\, $//; $affichage=~s/\, $defaut//g; $affichage=~s/$defaut\, //g; if ($affichage eq "") { $affichage=$defaut; }
 	print S "$contenu\t$affichage\n";
+	#print S "$resultat\t$affichage\n";
     }
     # Un seul nom de médicament
     else { 
@@ -153,24 +155,26 @@ sub traitement() {
 		my $contenu2=$cols2[$i]; $contenu2=~s/^\s+//; $contenu2=~s/\s+$//;
 		# Un nom se terminant par "-a" est peut-être de l'espagnol ou de l'italien : francisation
 		if ($contenu2=~/a$/) {
-		    my $classes=&identifieClasses($contenu);
-		    if ($classes ne $defaut) { $affichage.="$classes\, "; }
-		    else { $contenu2=~s/a$/e/; my $classes=&identifieClasses($contenu2); $affichage.="$classes\, "; }
+		    my ($classes,$res)=&identifieClasses($contenu);
+		    if ($classes ne $defaut) { $affichage.="$classes\, "; $resultat=$res; }
+		    else { $contenu2=~s/a$/e/; my ($classes,$res)=&identifieClasses($contenu2); $affichage.="$classes\, "; $resultat=$res; }
 		}
-		else { my $classes=&identifieClasses($contenu2); $affichage.="$classes\, "; }		
+		else { my ($classes,$res)=&identifieClasses($contenu2); $affichage.="$classes\, "; $resultat=$res; }		
 	    }
 	    $affichage=~s/\, $//; $affichage=~s/\, $defaut//g; $affichage=~s/$defaut\, //g; if ($affichage eq "") { $affichage=$defaut; }
 	    print S "$contenu\t$affichage\n";
+	    #print S "$resultat\t$affichage\n";
 	}
 	else {
 	    # Si un mot se termine par "-a", on vérifie qu'il ne
 	    # s'agit pas d'abord d'un mot réel en DCI, si la classe
 	    # reste nulle, on essaie une francisation
 	    if ($contenu=~/a$/) {
-		my $classes=&identifieClasses($contenu);
+		my ($classes,$res)=&identifieClasses($contenu);
 		if ($classes ne $defaut) { print S "$contenu\t$classes\n"; }
-		else { $contenu=~s/a$/e/; my $classes=&identifieClasses($contenu); print S "$contenu\t$classes\n"; }
-	    } else { my $classes=&identifieClasses($contenu); print S "$contenu\t$classes\n"; }
+		else { $contenu=~s/a$/e/; my ($classes,$res)=&identifieClasses($contenu); $resultat=$res; print S "$contenu\t$classes\n"; }
+	    } elsif ($contenu ne "") { my ($classes,$res)=&identifieClasses($contenu); $resultat=$res; print S "$contenu\t$classes\n"; }
+	    else { print S "\n"; }
 	}
     }
 }
@@ -199,7 +203,7 @@ sub identifieClasses() {
     foreach my $segment (sort keys %segments) {
 	if ($segment=~/^\-.*\-$/ && length($segment)>4) {
 	    my $s=$segment; $s=~s/\-//g;
-	    if ($cont=~/\w$s\w/) { $cl="$segments{$segment}"; $k++; } 
+	    if ($cont=~/\w$s\w/) { $cl="$segments{$segment}"; $k++; }
 	}
     }
 
@@ -233,11 +237,12 @@ sub identifieClasses() {
 	if ($segment=~/^\-.*\-$/) {
 	    my $s=$segment; $s=~s/\-//g;
 	    if ($cont=~/\w$s(\w+)/ && $cl eq "") {
+		#warn "--- $cont\t$s\n";
 		# On récupère la fin du mot après l'infixe identifié.
 		# Pour l'infixe -io-, on vérifie qu'il reste
 		# suffisamment de caractères pour éviter les erreurs
 		# sur les mots se terminant par "-tion" (inhalation,
-		# intervention) ou "microbiote".
+		# intervention, sénior) ou "microbiote".
 		my $finMot=$1;
 		if ($segment=~/\-io\-/) { if (length($finMot)>2) { $cl="$segments{$segment}"; $k++; }}
 		else { $cl="$segments{$segment}"; $k++; }
@@ -251,5 +256,5 @@ sub identifieClasses() {
 
 
     if ($cl eq "") { $cl=$defaut; }
-    return $cl;
+    return ($cl,$cont);
 }
